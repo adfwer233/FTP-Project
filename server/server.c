@@ -14,7 +14,7 @@
 
 // thread entry for new connection socket
 void new_client_connected() {
-    printf("new thread is running !");
+    printf("new thread is running ! \n");
 }
 
 int main() {
@@ -24,9 +24,8 @@ int main() {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = 20;
+    addr.sin_port = htons(2333);
     addr.sin_addr.s_addr = htonl(INADDR_ANY); // local 0.0.0.0, any
-
     // create control_connection socket
     if ((control_connection_listenfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         printf("creating control connection socket failed");
@@ -40,16 +39,20 @@ int main() {
     }
 
     // start listening socket connect to port 20
-    if (listen(control_connection_listenfd, MAX_CONNECTION_NUMBER)) {
+    if (listen(control_connection_listenfd, MAX_CONNECTION_NUMBER) == -1) {
         perror("ERROR: listening control socket failed");
         return -1;
     }
 
+
     while (1) {
+        printf("here running\n");
         if ((control_connection_connfd = accept(control_connection_listenfd, NULL, NULL)) == -1) {
             perror('Error: connection fd accept failed');
-            continue;;
+            continue;
         }
+
+        printf("new client come\n");
 
         pthread_t new_thread_id;
         if (pthread_create(&new_thread_id, NULL, (void *)new_client_connected, NULL) == -1) {
