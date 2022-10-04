@@ -20,10 +20,35 @@ struct new_client_connected_parameter {
     int control_connection_connfd;
 };
 
-void new_client_connected(void * t_param) {
+void close_session(struct new_client_connected_parameter * session_parameter) {
+    close(session_parameter->control_connection_connfd);
+    free(session_parameter);
+}
+
+void* new_client_connected(void * t_param) {
     struct new_client_connected_parameter * param = (struct new_client_connected_parameter *)t_param;
-    printf("new thread is running ! \n");
-    printf("%d \n", param->control_connection_connfd);
+
+    char buffer[1000];
+
+    int connfd = param->control_connection_connfd;
+
+    while (1) {
+        printf("this is the while loop\n");
+        int n = read(connfd, buffer, sizeof(buffer));
+        if (n == 0) {
+            printf("this is the end of loop\n");
+            break;
+        }
+        buffer[n] = 0;
+
+        char hello_msg[] = "hello, this is my FTP Server!";
+        int write_res = write(connfd, hello_msg, sizeof(hello_msg));
+        printf("%d\n", write_res);
+    }
+    
+    close_session(param);
+    printf("stsat\n");
+    return ((void*)0);
 }
 
 int main() {
