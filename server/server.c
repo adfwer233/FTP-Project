@@ -10,11 +10,20 @@
 #include <stdio.h>
 #include <pthread.h>
 
+#include <malloc.h>
+
 #define MAX_CONNECTION_NUMBER 20
 
 // thread entry for new connection socket
-void new_client_connected() {
+
+struct new_client_connected_parameter {
+    int control_connection_connfd;
+};
+
+void new_client_connected(void * t_param) {
+    struct new_client_connected_parameter * param = (struct new_client_connected_parameter *)t_param;
     printf("new thread is running ! \n");
+    printf("%d \n", param->control_connection_connfd);
 }
 
 int main() {
@@ -55,7 +64,11 @@ int main() {
         printf("new client come\n");
 
         pthread_t new_thread_id;
-        if (pthread_create(&new_thread_id, NULL, (void *)new_client_connected, NULL) == -1) {
+
+        struct new_client_connected_parameter * param = malloc(sizeof(struct new_client_connected_parameter));
+        param->control_connection_connfd = control_connection_connfd;
+
+        if (pthread_create(&new_thread_id, NULL, (void *)new_client_connected, (void *)param) == -1) {
             perror("Error: create new thread failed");
         }
 
