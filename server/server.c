@@ -32,22 +32,19 @@ void* new_client_connected(void * t_param) {
 
     int connfd = param->control_connection_connfd;
 
+    char hello_msg[] = "hello, this is my FTP Server!";
+    int write_res = write(connfd, hello_msg, sizeof(hello_msg));
+
     while (1) {
-        printf("this is the while loop\n");
         int n = read(connfd, buffer, sizeof(buffer));
         if (n == 0) {
-            printf("this is the end of loop\n");
+            printf("the session end\n");
             break;
         }
         buffer[n] = 0;
-
-        char hello_msg[] = "hello, this is my FTP Server!";
-        int write_res = write(connfd, hello_msg, sizeof(hello_msg));
-        printf("%d\n", write_res);
     }
     
     close_session(param);
-    printf("stsat\n");
     return ((void*)0);
 }
 
