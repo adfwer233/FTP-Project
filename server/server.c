@@ -13,6 +13,7 @@
 #include <malloc.h>
 
 #include <string.h>
+
 #include <sys/stat.h>
 
 // opendir and readdir
@@ -106,6 +107,22 @@ enum VERB cmd_get_verb(char* verb_str) {
             return i;
     }
     return 0;
+}
+
+void convert_perm_to_str(int perm, char* target) {
+
+    for(int i = 6; i>=0; i-=3){
+        int curperm = ((perm & ALLPERMS) >> i ) & 0x7;
+
+        char buffer[3];
+
+        int read = (curperm >> 2) & 0x1;
+        int write = (curperm >> 1) & 0x1;
+        int exec = (curperm >> 0) & 0x1;
+
+        sprintf(buffer, "%c%c%c", read ? 'r' : '-' ,write ? 'w' : '-', exec ? 'x' : '-');
+        strcat(target, buffer);
+    }
 }
 
 /*
@@ -263,6 +280,9 @@ int cmd_handler(char * buffer, int client_id) {
                 return 0;
             }
 
+            // for file stat
+            struct stat statbuf;
+
             // code for get LIST msg
 
             char current_path[PATH_BUFFER_SIZE];
@@ -285,11 +305,29 @@ int cmd_handler(char * buffer, int client_id) {
             if (client_array[client_id].conn_mode != NOT_SET) {
                 write(client_array[client_id].control_connection_fd, MSG150, strlen(MSG150));
                 while(entry = readdir(dir)) {
-                    dprintf(client_array[client_id].data_connection_fd_conn,
-                        "%s \n",
+
+                    // stat the current dir
+                    stat(entry->d_name,&statbuf);
+                    
+                    char *perms = malloc(9);
+                    memset(perms,0,9);
+
+                    /* Convert time_t to tm struct */
+                    time_t rawtime = statbuf.st_mtime;
+                    struct tm* time = localtime(&rawtime);
+                    char * timebuff[100];
+                    strftime(timebuff,80,"%b %d %H:%M",time);
+                    convert_perm_to_str((statbuf.st_mode & ALLPERMS), perms);
+
+                    dprintf(client_array[client_id].data_connection_fd_conn, "%c%s %5d %4d %4d %8d %s %s\r\n", 
+                        (entry->d_type==DT_DIR) ? 'd' : '-',
+                        perms,statbuf.st_nlink,
+                        statbuf.st_uid, 
+                        statbuf.st_gid,
+                        statbuf.st_size,
+                        timebuff,
                         entry->d_name
                     );
-                    printf("%s \n", entry->d_name);
                 }
                 dprintf(client_array[client_id].data_connection_fd_conn, "\r\n");
                 close(client_array[client_id].data_connection_fd_conn);
@@ -422,6 +460,9 @@ void* new_client_connected(void * t_param) {
 int main(int argc, char *argv[]) {
 
     printf("%d\n", argc);
+
+    // random seed
+    srand(time(0));
 
     if (argc == 1) {
         server.port = DEFAULT_PORT;
