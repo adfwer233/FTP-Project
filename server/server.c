@@ -307,9 +307,7 @@ int cmd_handler(char * buffer, int client_id) {
     } else if (cmd_verb == PWD) {
         char tmp_buf[PATH_BUFFER_SIZE];
         char * target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
-        strcat(target, "\r\n");
-        printf("%s \n", target);
-        write(client_array[client_id].control_connection_fd, target, strlen(target));
+        dprintf(client_array[client_id].control_connection_fd, "257 %s \r\n", target);
     } else if (cmd_verb == CWD) {
         if (num_params == 1) {
             if (chdir(cmd_content[1]) < 0) {
