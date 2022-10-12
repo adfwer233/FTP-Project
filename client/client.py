@@ -19,26 +19,37 @@ class FTPClient():
         self.login_status = False
 
     def recv_msg(self, socket_conn):
-        buffer: str = ''
+        while True:
+            buffer: str = ''
+            while True:
+                tmp = socket_conn.recv(1024).decode()
+                if len(tmp) == 0:
+                    continue
+                buffer += tmp
+                if '\r\n' in buffer:
+                    break
+            self.server_msg_handler(buffer.strip())
+            if (re.match("^\d\d\d ", buffer) != None):
+                break
+
+    def recv_data_msg(self, socket_conn):
+        buffer = ' '
         while True:
             tmp = socket_conn.recv(1024).decode()
             if len(tmp) == 0:
-                continue
-            buffer += tmp
-            if '\r\n' in buffer:
                 break
-        return buffer
+            buffer += tmp
+        return buffer.strip()
 
     def data_connection_process(self):
         self.data_connection_conn, conn_addr = self.data_connection_listen.accept()
-        print("data port connection accept")
-        recv_data = self.recv_msg(self.data_connection_conn)
+        recv_data = self.recv_data_msg(self.data_connection_conn)
         if len(recv_data) > 0:
-            print("data_conn > ",recv_data)
+            print(recv_data)
 
     def pasv_data_connection(self):
-        server_msg = self.recv_msg(self.data_connection_conn)
-        print("pasv data conn > ", server_msg)
+        server_msg = self.recv_data_msg(self.data_connection_conn)
+        print(server_msg)
 
     def cmd_sender(self, cmd: str):
         cmd = cmd + '\r\n'
@@ -50,9 +61,7 @@ class FTPClient():
         else:
             self.control_connection.send(cmd.encode('utf-8'))
 
-    def server_msg_handler(self):
-        print("waiting")
-        server_response = self.recv_msg(self.control_connection)
+    def server_msg_handler(self, server_response):
         status_code = server_response.split(' ')[0]
         if status_code == '227':
             print(server_response)
@@ -65,6 +74,9 @@ class FTPClient():
             data_connection_listening_thread = threading.Thread(target=self.pasv_data_connection, daemon=True)
             data_connection_listening_thread.start()
         print(server_response.strip())
+
+    def recv_server_handler(self):
+        self.recv_msg(self.control_connection)
 
     def cmd_port(self, cmd: str):
         cmd = cmd.strip()
@@ -95,12 +107,12 @@ class FTPClient():
         while(1):
             input_cmd = input()
             self.cmd_sender(input_cmd)
-            self.server_msg_handler()
+            self.recv_server_handler()
 
 
 
 if __name__ == '__main__':
-    client = FTPClient('127.0.0.1', 2333)
+    client = FTPClient('127.0.0.1', 2334)
 
     client.connect_server()
 

@@ -26,18 +26,21 @@
 #define PATH_BUFFER_SIZE 100
 // marco definition of Response
 
-#define MSG150 "150 Here comes the directory listing.\r\n"
+#define MSG150 "150-Here comes the directory listing.\r\n"
 #define MSG200 "200 Type set to I.\r\n"
 #define MSG200PORT "200 PORT command successful.\r\n"
 #define MSG215 "215 UNIX Type: L8.\r\n"
 #define MSG220 "220 Anonymous FTP server ready.\r\n"
 #define MSG221 "221 Goodbye.\r\n"
+#define MSG226 "226 Directory send OK.\r\n"
 #define MSG230 "230 Login Successful.\r\n"
 #define MSG250 "250 cmd success\r\n"
 #define MSG331 "331 User name okay, need password\r\n"
 #define MSG501 "501 Syntax error.\r\n"
+#define MSG530 "530 Please login with USER and PASS.\r\n"
 #define MSG553 "553 Cannot rename file.\r\n"
 #define MSG550 "550 Cannot remove directory.\r\n"
+#define MSG435 "425 Please use PASV or PROT firstly.\r\n"
 
 struct serverState {
     int port;   
@@ -101,6 +104,11 @@ enum VERB cmd_get_verb(char* verb_str) {
     return 0;
 }
 
+/*
+    return 0 for normal behavior
+    return -1 for QUIT cmd
+    return 1 for syntax error
+*/
 int cmd_handler(char * buffer, int client_id) {
     char cmd_content[10][PATH_BUFFER_SIZE];
     int n = strlen(buffer); // number of params
@@ -122,9 +130,14 @@ int cmd_handler(char * buffer, int client_id) {
     printf("%s %s\n", cmd_content[0], cmd_content[1]);
     enum VERB cmd_verb = cmd_get_verb(cmd_content[0]);
 
+    if (cmd_verb != USER && client_array[client_id].login == 0) {
+        write(client_array[client_id].control_connection_fd, MSG530, strlen(MSG530));
+        return 0;
+    }
+
     if (cmd_verb == USER) {
         if (num_params != 1) {
-            // error
+            return 1;
         }
         else {
             if (strcmp("anonymous", cmd_content[1]) == 0) {
@@ -133,22 +146,22 @@ int cmd_handler(char * buffer, int client_id) {
                     char *ret_msg = MSG331;
                     write(client_array[client_id].control_connection_fd, ret_msg, strlen(ret_msg) + 1);
 
-                } else {
-                    // error: client have login
                 }
             } else {
-                // error: Unsupported login type
+                const char* tmpmsg = "530 Invalid username\r\n";
+                write(client_array[client_id].control_connection_fd, tmpmsg, strlen(tmpmsg));
             }
         }
     } else if (cmd_verb == PASS) {
         if (num_params != 1) {
-            // error
+            return 1;
         } else {
             if (client_array[client_id].password == 0) {
                 client_array[client_id].password = 1;
                 write(client_array[client_id].control_connection_fd, MSG230, strlen(MSG230));
             } else {
-                // error: client has send pass cmd before
+                const char* tmpmsg = "500 Invalid username or password\r\n";
+                write(client_array[client_id].control_connection_fd, tmpmsg, strlen(tmpmsg));
             }
         }
     } else if (cmd_verb == PORT) {
@@ -196,7 +209,7 @@ int cmd_handler(char * buffer, int client_id) {
             write(client_array[client_id].control_connection_fd, MSG200PORT, strlen(MSG200PORT));
 
         } else {
-            // error: wrong format
+            return 1;
         }
     } else if (cmd_verb == PASV) {
         
@@ -240,6 +253,11 @@ int cmd_handler(char * buffer, int client_id) {
 
     } else if (cmd_verb == LIST) {
         if (num_params == 1) {
+            
+            if (client_array[client_id].conn_mode == NOT_SET) {
+                write(client_array[client_id].control_connection_fd, MSG435, strlen(MSG435));
+                return 0;
+            }
 
             // code for get LIST msg
 
@@ -274,8 +292,13 @@ int cmd_handler(char * buffer, int client_id) {
                 if (client_array[client_id].conn_mode == PASV_t) {
                     close(client_array[client_id].data_connection_fd_listen);
                 }
+                client_array[client_id].conn_mode = NOT_SET;
             } 
             chdir(origin_path);
+
+            write(client_array[client_id].control_connection_fd, MSG226, strlen(MSG226));
+        } else {
+            return 1;
         }
     } else if (cmd_verb == PWD) {
         char tmp_buf[PATH_BUFFER_SIZE];
@@ -290,6 +313,8 @@ int cmd_handler(char * buffer, int client_id) {
             char * target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
             strcat(target, "\r\n");
             write(client_array[client_id].control_connection_fd, target, strlen(target));
+        } else {
+            return 1;
         }
     } else if (cmd_verb == MKD) {
         printf("%s \n", cmd_content[1]);
@@ -308,6 +333,8 @@ int cmd_handler(char * buffer, int client_id) {
             target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
             strcat(target, "\r\n");
             write(client_array[client_id].control_connection_fd, target, strlen(target));
+        } else {
+            return 1;
         }
     } else if (cmd_verb == SYST) {
         write(client_array[client_id].control_connection_fd, MSG215, strlen(MSG215));
@@ -325,14 +352,14 @@ int cmd_handler(char * buffer, int client_id) {
                 write(client_array[client_id].control_connection_fd, tmp, strlen(tmp));
             }
         } else {
-            // error: wrong parameters
+            return 1;
         }
     } else if (cmd_verb == RNFR) {
         if (num_params == 1) {
             strcpy(client_array[client_id].to_rename, cmd_content[1]);
             write(client_array[client_id].control_connection_fd, MSG250, strlen(MSG250));
         } else {
-            // error: wrong parameters ...
+            return 1;
         }
     } else if (cmd_verb == RNTO) {
         if (num_params == 1) {
@@ -343,7 +370,7 @@ int cmd_handler(char * buffer, int client_id) {
                 write(client_array[client_id].control_connection_fd, MSG250, strlen(MSG250));
             }
         } else {
-            // error: wrong parameters ...
+            return 1;
         }
     }
     
@@ -365,6 +392,8 @@ void* new_client_connected(void * t_param) {
     client_array[client_id].login = 0;
     client_array[client_id].password = 0;
     client_array[client_id].control_connection_fd = param->control_connection_connfd;
+    client_array[client_id].conn_mode = NOT_SET;
+
     strcpy(client_array[client_id].path, server.rootDir);
     char buffer[1000];
 
@@ -386,6 +415,9 @@ void* new_client_connected(void * t_param) {
 
         if (cmd_res == -1)
             break;
+        else if (cmd_res == 1) {
+            write(connfd, MSG501, strlen(MSG501));
+        }
     }
     
     close_session(param);
@@ -398,19 +430,46 @@ int main(int argc, char *argv[]) {
 
     if (argc == 1) {
         server.port = 2333;
-        // getcwd(server.rootDir, sizeof(server.rootDir));
+        getcwd(server.rootDir, sizeof(server.rootDir));
     } else if (argc == 3) {
         if (strcmp(argv[1], "--port") == 0) {
             server.port = atoi(argv[2]);
-            // getcwd(server.rootDir, sizeof(server.rootDir));
+            getcwd(server.rootDir, sizeof(server.rootDir));
+        } else if (strcmp(argv[1], "--root") == 0) {
+            server.port = atoi(argv[2]);
+        } else {
+            perror("Wrong Parameters\n");
+            return 0;
         }
+    } else if (argc == 5) {
+        if (strcmp(argv[1], "--port") == 0 && strcmp(argv[3], "--root") == 0) {
+            server.port = atoi(argv[2]);
+            if (chdir(argv[4]) < 0) {
+                perror("wrong root directory path");
+                return 0;
+            }
+            strcpy(server.rootDir, argv[4]);
+        } else if (strcmp(argv[3], "--port") == 0 && strcmp(argv[1], "--root") == 0) {
+            server.port = atoi(argv[4]);
+            if (chdir(argv[2]) < 0) {
+                perror("wrong root directory path");
+                return 0;
+            }
+            strcpy(server.rootDir, argv[2]);
+        } else {
+            perror("Wrong Parameters\n");
+            return 0;
+        }
+    } else {
+            perror("Wrong number of Parameters\n");
+            return 0;
     }
 
+    chdir(server.rootDir);
     printf("Server running on port %d \n", server.port);
 
     int control_connection_listenfd, control_connection_connfd;
     
-    server.port = 2333;
     strcpy(server.rootDir, "testDir");
     // the local socket address
     struct sockaddr_in addr;
