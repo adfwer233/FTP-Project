@@ -25,7 +25,7 @@ class FTPClient():
             if len(tmp) == 0:
                 continue
             buffer += tmp
-            if '\n' in buffer:
+            if '\r\n' in buffer:
                 break
         return buffer
 
@@ -55,6 +55,7 @@ class FTPClient():
         server_response = self.recv_msg(self.control_connection)
         status_code = server_response.split(' ')[0]
         if status_code == '227':
+            print(server_response)
             pattern = re.compile('\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)')
             match_res = re.search(pattern, server_response.strip())
             h1, h2, h3, h4, p1, p2 = match_res.groups()

@@ -16,24 +16,32 @@
 #include <sys/stat.h>
 
 // opendir and readdir
-#include<sys/types.h>
-#include<dirent.h>
+#include <sys/types.h>
+#include <dirent.h>
+
+// atoi
+#include <stdlib.h>
 
 #define MAX_CONNECTION_NUMBER 20
-
+#define PATH_BUFFER_SIZE 100
 // marco definition of Response
 
 #define MSG150 "150 Here comes the directory listing.\r\n"
 #define MSG200 "200 Type set to I.\r\n"
 #define MSG200PORT "200 PORT command successful.\r\n"
 #define MSG215 "215 UNIX Type: L8.\r\n"
-#define MSG220 "220 Anonymous FTP server ready.\n"
+#define MSG220 "220 Anonymous FTP server ready.\r\n"
 #define MSG221 "221 Goodbye.\r\n"
 #define MSG230 "230 Login Successful.\r\n"
+#define MSG250 "250 cmd success\r\n"
 #define MSG331 "331 User name okay, need password\r\n"
+#define MSG501 "501 Syntax error.\r\n"
+#define MSG553 "553 Cannot rename file.\r\n"
+#define MSG550 "550 Cannot remove directory.\r\n"
+
 struct serverState {
     int port;   
-    char rootDir[100];
+    char rootDir[PATH_BUFFER_SIZE];
     int client_number;
 };
 
@@ -41,12 +49,13 @@ struct clientState {
     int living;   // zero for death, positive for pos in array
     int login;
     int password;
-    enum mode{PASV_t, PORT_t} conn_mode;
+    enum mode{PASV_t, PORT_t, NOT_SET} conn_mode;
     int data_connection_fd_listen;
     int data_connection_fd_conn;
     int control_connection_fd;
 
-    char path[100];
+    char path[PATH_BUFFER_SIZE];
+    char to_rename[PATH_BUFFER_SIZE];
 };
 
 struct clientState client_array[MAX_CONNECTION_NUMBER];
@@ -54,9 +63,10 @@ struct serverState server;
 
 // thread entry for new connection socket
 
-enum VERB{USER, PASS, PORT, PASV, LIST, CWD, PWD, MKD, SYST, TYPE, QUIT, ABOR};
-char *VERB_STR[] = {"USER", "PASS", "PORT", "PASV", "LIST", "CWD", "PWD", "MKD", "SYST", "TYPE", "QUIT", "ABOR"};
+enum VERB{USER, PASS, PORT, PASV, LIST, CWD, PWD, MKD, RMD, SYST, TYPE, QUIT, ABOR, RNFR, RNTO};
+char *VERB_STR[] = {"USER", "PASS", "PORT", "PASV", "LIST", "CWD", "PWD", "MKD", "RMD", "SYST", "TYPE", "QUIT", "ABOR", "RNFR", "RNTO"};
 int cmd_number = sizeof(VERB_STR) / sizeof(char *);
+
 struct new_client_connected_parameter {
     int control_connection_connfd;
 };
@@ -92,7 +102,7 @@ enum VERB cmd_get_verb(char* verb_str) {
 }
 
 int cmd_handler(char * buffer, int client_id) {
-    char cmd_content[10][100];
+    char cmd_content[10][PATH_BUFFER_SIZE];
     int n = strlen(buffer); // number of params
 
     int num_params = 0;
@@ -149,7 +159,7 @@ int cmd_handler(char * buffer, int client_id) {
             sscanf(cmd_content[1], "%d,%d,%d,%d,%d,%d", &h1, &h2, &h3, &h4, &p1, &p2);
             client_array[client_id].conn_mode = PORT_t;
             int port = p1 * 256 + p2;
-            char ipbuf[100];
+            char ipbuf[PATH_BUFFER_SIZE];
             sprintf(ipbuf, "%d.%d.%d.%d", h1, h2, h3, h4);
             printf("ip: %s, port %d\n", ipbuf, port);
             // create a conn socket to client
@@ -189,14 +199,52 @@ int cmd_handler(char * buffer, int client_id) {
             // error: wrong format
         }
     } else if (cmd_verb == PASV) {
+        
+        // return localhost IP
+        int random_port = rand() % 20000 + 10000;
+        int p1 = random_port / 256;
+        int p2 = random_port % 256;
+
+        const char * local_ip_str = "127,0,0,1";
+
+        // create new listening socket
+
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(random_port);
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+        if ((client_array[client_id].data_connection_fd_listen = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+            printf("creating control connection socket failed");
+            return 1;
+        }
+
+        // binding socket
+        if (bind(client_array[client_id].data_connection_fd_listen, (struct sockaddr_in *)(&addr), sizeof(addr)) == -1) {
+            perror("binding control listen socket failed");
+            return -1;
+        }
+
+        if (listen(client_array[client_id].data_connection_fd_listen, MAX_CONNECTION_NUMBER) == -1) {
+            perror("ERROR: listening control socket failed");
+            return -1;
+        }
+        // return the msg by control connection and set the conn mode
+        dprintf(client_array[client_id].control_connection_fd, "227 Entering Passive Mode (%s,%d,%d) \r\n", local_ip_str, p1, p2);
+        client_array[client_id].conn_mode = PASV_t;
+
+        // listening on the random port, blocking the current thread
+        client_array[client_id].data_connection_fd_conn = accept(client_array[client_id].data_connection_fd_listen, NULL, NULL);
+        printf("Got the connect from client \n");
 
     } else if (cmd_verb == LIST) {
         if (num_params == 1) {
 
             // code for get LIST msg
 
-            char current_path[100];
-            char origin_path[100];
+            char current_path[PATH_BUFFER_SIZE];
+            char origin_path[PATH_BUFFER_SIZE];
             memset(current_path, 0, sizeof(current_path));
             memset(origin_path,  0, sizeof(origin_path ));
 
@@ -212,38 +260,42 @@ int cmd_handler(char * buffer, int client_id) {
             struct dirent* entry;
             
             // following code for transmit
-            if (client_array[client_id].conn_mode == PORT_t) {
-                printf("running correct\n");
+            if (client_array[client_id].conn_mode != NOT_SET) {
                 write(client_array[client_id].control_connection_fd, MSG150, strlen(MSG150));
                 while(entry = readdir(dir)) {
                     dprintf(client_array[client_id].data_connection_fd_conn,
-                        "%s \r\n",
+                        "%s \n",
                         entry->d_name
                     );
+                    printf("%s \n", entry->d_name);
                 }
-            } else if (client_array[client_id].conn_mode == PASV_t) {
-                // no pasv now
-            }
+                dprintf(client_array[client_id].data_connection_fd_conn, "\r\n");
+                close(client_array[client_id].data_connection_fd_conn);
+                if (client_array[client_id].conn_mode == PASV_t) {
+                    close(client_array[client_id].data_connection_fd_listen);
+                }
+            } 
+            chdir(origin_path);
         }
     } else if (cmd_verb == PWD) {
-        char tmp_buf[100];
-        char * target = getcwd(tmp_buf, 100);
+        char tmp_buf[PATH_BUFFER_SIZE];
+        char * target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
         strcat(target, "\r\n");
         printf("%s \n", target);
         write(client_array[client_id].control_connection_fd, target, strlen(target));
     } else if (cmd_verb == CWD) {
         if (num_params == 1) {
             chdir(cmd_content[1]);
-            char tmp_buf[100];
-            char * target = getcwd(tmp_buf, 100);
+            char tmp_buf[PATH_BUFFER_SIZE];
+            char * target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
             strcat(target, "\r\n");
             write(client_array[client_id].control_connection_fd, target, strlen(target));
         }
     } else if (cmd_verb == MKD) {
         printf("%s \n", cmd_content[1]);
         if (num_params == 1) {
-            char tmp_buf[100];
-            char * target = getcwd(tmp_buf, 100);
+            char tmp_buf[PATH_BUFFER_SIZE];
+            char * target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
             printf("%s \n", target);
             strcpy(tmp_buf, target);
             printf("%s \n", tmp_buf);
@@ -253,18 +305,47 @@ int cmd_handler(char * buffer, int client_id) {
             printf("%s \n", tmp_buf);
 
             int res = mkdir(tmp_buf, 0777);
-            target = getcwd(tmp_buf, 100);
+            target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
             strcat(target, "\r\n");
             write(client_array[client_id].control_connection_fd, target, strlen(target));
         }
     } else if (cmd_verb == SYST) {
-        write(client_array[client_id].control_connection_fd, MSG215, sizeof(MSG215));
+        write(client_array[client_id].control_connection_fd, MSG215, strlen(MSG215));
     } else if (cmd_verb == TYPE) {
-        write(client_array[client_id].control_connection_fd, MSG200, sizeof(MSG200));
+        write(client_array[client_id].control_connection_fd, MSG200, strlen(MSG200));
     } else if (cmd_verb == QUIT || cmd_verb == ABOR) {
-        write(client_array[client_id].control_connection_fd, MSG221, sizeof(MSG221));
+        write(client_array[client_id].control_connection_fd, MSG221, strlen(MSG221));
         return -1;
-    } 
+    } else if (cmd_verb == RMD) {
+        if (num_params == 1) {
+            if (rmdir(cmd_content[1]) < 0) {
+                write(client_array[client_id].control_connection_fd, MSG550, strlen(MSG550));
+            } else {
+                const char *tmp = "250 Directory removed.\r\n";
+                write(client_array[client_id].control_connection_fd, tmp, strlen(tmp));
+            }
+        } else {
+            // error: wrong parameters
+        }
+    } else if (cmd_verb == RNFR) {
+        if (num_params == 1) {
+            strcpy(client_array[client_id].to_rename, cmd_content[1]);
+            write(client_array[client_id].control_connection_fd, MSG250, strlen(MSG250));
+        } else {
+            // error: wrong parameters ...
+        }
+    } else if (cmd_verb == RNTO) {
+        if (num_params == 1) {
+            printf("%s %s\n", client_array[client_id].to_rename, cmd_content[1]);
+            if (rename(client_array[client_id].to_rename, cmd_content[1]) < 0) {
+                write(client_array[client_id].control_connection_fd, MSG553, strlen(MSG553));
+            } else {
+                write(client_array[client_id].control_connection_fd, MSG250, strlen(MSG250));
+            }
+        } else {
+            // error: wrong parameters ...
+        }
+    }
     
     return 0;
 }
@@ -311,7 +392,22 @@ void* new_client_connected(void * t_param) {
     return ((void*)0);
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+
+    printf("%d\n", argc);
+
+    if (argc == 1) {
+        server.port = 2333;
+        // getcwd(server.rootDir, sizeof(server.rootDir));
+    } else if (argc == 3) {
+        if (strcmp(argv[1], "--port") == 0) {
+            server.port = atoi(argv[2]);
+            // getcwd(server.rootDir, sizeof(server.rootDir));
+        }
+    }
+
+    printf("Server running on port %d \n", server.port);
+
     int control_connection_listenfd, control_connection_connfd;
     
     server.port = 2333;
@@ -342,13 +438,10 @@ int main() {
 
 
     while (1) {
-        printf("here running\n");
         if ((control_connection_connfd = accept(control_connection_listenfd, NULL, NULL)) == -1) {
             perror('Error: connection fd accept failed');
             continue;
         }
-
-        printf("new client come\n");
 
         pthread_t new_thread_id;
 
