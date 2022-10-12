@@ -28,6 +28,7 @@ class FTPClient():
                 buffer += tmp
                 if '\r\n' in buffer:
                     break
+                print(buffer)
             self.server_msg_handler(buffer.strip())
             if (re.match("^\d\d\d ", buffer) != None):
                 break

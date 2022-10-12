@@ -39,7 +39,9 @@
 #define MSG501 "501 Syntax error.\r\n"
 #define MSG530 "530 Please login with USER and PASS.\r\n"
 #define MSG553 "553 Cannot rename file.\r\n"
-#define MSG550 "550 Cannot remove directory.\r\n"
+#define MSG550CW "550 Cannot change directory.\r\n"
+#define MSG550RM "550 Cannot remove directory.\r\n"
+#define MSG550MK "550 Cannot create directory.\r\n"
 #define MSG435 "425 Please use PASV or PROT firstly.\r\n"
 
 struct serverState {
@@ -308,31 +310,24 @@ int cmd_handler(char * buffer, int client_id) {
         write(client_array[client_id].control_connection_fd, target, strlen(target));
     } else if (cmd_verb == CWD) {
         if (num_params == 1) {
-            chdir(cmd_content[1]);
-            char tmp_buf[PATH_BUFFER_SIZE];
-            char * target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
-            strcat(target, "\r\n");
-            write(client_array[client_id].control_connection_fd, target, strlen(target));
+            if (chdir(cmd_content[1]) < 0) {
+                write(client_array[client_id].control_connection_fd, MSG550CW, strlen(MSG550CW));
+            } else {
+                write(client_array[client_id].control_connection_fd, MSG250, strlen(MSG250));
+            }
         } else {
             return 1;
         }
     } else if (cmd_verb == MKD) {
         printf("%s \n", cmd_content[1]);
         if (num_params == 1) {
-            char tmp_buf[PATH_BUFFER_SIZE];
-            char * target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
-            printf("%s \n", target);
-            strcpy(tmp_buf, target);
-            printf("%s \n", tmp_buf);
-            strcat(tmp_buf, "/");
-            printf("%s \n", tmp_buf);
-            strcat(tmp_buf, cmd_content[1]);
-            printf("%s \n", tmp_buf);
-
-            int res = mkdir(tmp_buf, 0777);
-            target = getcwd(tmp_buf, PATH_BUFFER_SIZE);
-            strcat(target, "\r\n");
-            write(client_array[client_id].control_connection_fd, target, strlen(target));
+            int res = mkdir(cmd_content[1], S_IRWXU);
+            if (res < 0) {
+                write(client_array[client_id].control_connection_fd, MSG550MK, strlen(MSG550MK));
+                
+            } else {
+                dprintf(client_array[client_id].control_connection_fd, "257 %s has been created\r\n", cmd_content[1]);
+            }
         } else {
             return 1;
         }
@@ -346,7 +341,7 @@ int cmd_handler(char * buffer, int client_id) {
     } else if (cmd_verb == RMD) {
         if (num_params == 1) {
             if (rmdir(cmd_content[1]) < 0) {
-                write(client_array[client_id].control_connection_fd, MSG550, strlen(MSG550));
+                write(client_array[client_id].control_connection_fd, MSG550RM, strlen(MSG550RM));
             } else {
                 const char *tmp = "250 Directory removed.\r\n";
                 write(client_array[client_id].control_connection_fd, tmp, strlen(tmp));
