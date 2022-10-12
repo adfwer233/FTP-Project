@@ -147,8 +147,6 @@ int cmd_handler(char * buffer, int client_id) {
         }
     }
     num_params -= 1;
-    printf("%d %d\n", num_params, n);
-    printf("%s %s\n", cmd_content[0], cmd_content[1]);
     enum VERB cmd_verb = cmd_get_verb(cmd_content[0]);
 
     if (cmd_verb != USER && client_array[client_id].login == 0) {
@@ -195,7 +193,6 @@ int cmd_handler(char * buffer, int client_id) {
             int port = p1 * 256 + p2;
             char ipbuf[PATH_BUFFER_SIZE];
             sprintf(ipbuf, "%d.%d.%d.%d", h1, h2, h3, h4);
-            printf("ip: %s, port %d\n", ipbuf, port);
             // create a conn socket to client
 
             int sockfd;
@@ -308,7 +305,7 @@ int cmd_handler(char * buffer, int client_id) {
 
                     // stat the current dir
                     stat(entry->d_name,&statbuf);
-                    
+
                     char *perms = malloc(9);
                     memset(perms,0,9);
 
@@ -357,7 +354,6 @@ int cmd_handler(char * buffer, int client_id) {
             return 1;
         }
     } else if (cmd_verb == MKD) {
-        printf("%s \n", cmd_content[1]);
         if (num_params == 1) {
             int res = mkdir(cmd_content[1], S_IRWXU);
             if (res < 0) {
