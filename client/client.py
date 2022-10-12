@@ -4,6 +4,7 @@ import socket
 import threading
 import random
 import re
+import time
 
 class FTPClient():
 
@@ -17,14 +18,26 @@ class FTPClient():
 
         self.login_status = False
 
+    def recv_msg(self, socket_conn):
+        buffer: str = ''
+        while True:
+            tmp = socket_conn.recv(1024).decode()
+            if len(tmp) == 0:
+                continue
+            buffer += tmp
+            if '\n' in buffer:
+                break
+        return buffer
+
     def data_connection_process(self):
         self.data_connection_conn, conn_addr = self.data_connection_listen.accept()
-        recv_data = self.data_connection_conn.recv(1024).decode()
+        print("data port connection accept")
+        recv_data = self.recv_msg(self.data_connection_conn)
         if len(recv_data) > 0:
             print("data_conn > ",recv_data)
 
     def pasv_data_connection(self):
-        server_msg = self.data_connection_conn.recv(1024)
+        server_msg = self.recv_msg(self.data_connection_conn)
         print("pasv data conn > ", server_msg)
 
     def cmd_sender(self, cmd: str):
@@ -38,7 +51,8 @@ class FTPClient():
             self.control_connection.send(cmd.encode('utf-8'))
 
     def server_msg_handler(self):
-        server_response = self.control_connection.recv(1024).decode()
+        print("waiting")
+        server_response = self.recv_msg(self.control_connection)
         status_code = server_response.split(' ')[0]
         if status_code == '227':
             pattern = re.compile('\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)')
@@ -50,6 +64,7 @@ class FTPClient():
             data_connection_listening_thread = threading.Thread(target=self.pasv_data_connection, daemon=True)
             data_connection_listening_thread.start()
         print(server_response.strip())
+
     def cmd_port(self, cmd: str):
         cmd = cmd.strip()
         verb, params = cmd.split(' ')
@@ -84,7 +99,7 @@ class FTPClient():
 
 
 if __name__ == '__main__':
-    client = FTPClient('127.0.0.1', 5000)
+    client = FTPClient('127.0.0.1', 2333)
 
     client.connect_server()
 
