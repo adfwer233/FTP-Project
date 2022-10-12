@@ -22,6 +22,8 @@
 // atoi
 #include <stdlib.h>
 
+#define DEFAULT_PORT 21
+
 #define MAX_CONNECTION_NUMBER 20
 #define PATH_BUFFER_SIZE 100
 // marco definition of Response
@@ -424,7 +426,7 @@ int main(int argc, char *argv[]) {
     printf("%d\n", argc);
 
     if (argc == 1) {
-        server.port = 2333;
+        server.port = DEFAULT_PORT;
         getcwd(server.rootDir, sizeof(server.rootDir));
     } else if (argc == 3) {
         if (strcmp(argv[1], "--port") == 0) {

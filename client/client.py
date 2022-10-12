@@ -5,6 +5,12 @@ import threading
 import random
 import re
 import time
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--port', type=int, default=21)
+parser.add_argument('--ip', type=str, default='127.0.0.1')
+args = parser.parse_args()
 
 class FTPClient():
 
@@ -113,7 +119,7 @@ class FTPClient():
 
 
 if __name__ == '__main__':
-    client = FTPClient('127.0.0.1', 2334)
+    client = FTPClient(args.ip, args.port)
 
     client.connect_server()
 
